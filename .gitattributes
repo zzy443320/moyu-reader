@@ -1,0 +1,27 @@
+# 统一换行符处理：避免在 Windows 上 checkout 后文件被改坏
+#
+# 背景：.bat 文件必须用 CRLF 行尾，否则 cmd.exe 解析 if/goto 会错乱导致闪退。
+# 这里显式锁定关键文件的换行符，不依赖各人的 core.autocrlf 设置。
+
+* text=auto eol=lf
+
+# Windows 批处理脚本：按原样存储（CRLF），禁止任何换行符转换。
+# 用 -text 而不是 eol=crlf —— eol=crlf 只是「检出时转成 CRLF」，
+# 仓库里存的仍是 LF；改用 -text 后仓库里就是真正的 CRLF，最保险。
+*.bat -text
+*.cmd -text
+
+# Python / JS / HTML / CSS：统一 LF
+*.py   text eol=lf
+*.js   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+
+# 二进制文件不做任何转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.zip binary

@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>摸鱼阅读器</title>
+<style>
+  :root{
+    /* 低对比灰：不刺眼、不像弹窗，混在编辑器/终端旁边不显眼 */
+    --paper:#F2F1EE;
+    --ink:#3A3A3C;
+    --subtle:#9C9A96;
+    --accent:#6E6E73;
+    --bar:#EAE9E5;
+    --line:#DEDDD9;
+    --alpha:0.93;
+    --fs:16px;
+    --lh:1.9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+    background:#3C3F44;
+    color:var(--ink);
+    overflow:hidden;
+    user-select:none;
+  }
+
+  /* ---------- 浮窗本体 ---------- */
+  #win{
+    position:fixed;
+    top:70px;left:16px;
+    width:430px;height:600px;
+    min-width:260px;min-height:220px;
+    background:rgba(251,248,241,var(--alpha));
+    backdrop-filter:blur(10px) saturate(1.1);
+    -webkit-backdrop-filter:blur(10px) saturate(1.1);
+    border:1px solid var(--line);
+    border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.18);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    transition:opacity .18s ease;
+  }
+  #win.hidden{display:none}
+  #win.disguised .bar,#win.disguised .status,#win.disguised .edge{display:none}
+  #win.disguised{border-color:transparent;box-shadow:0 8px 30px rgba(0,0,0,.28);border-radius:6px}
+
+  /* ---------- 侧边收条状态 ----------
+     鼠标离开后缩成贴边一条细缝（几乎看不见），鼠标移上去再展开 */
+  #win.docked{
+    width:8px!important;
+    min-width:8px!important;
+    opacity:.30;
+    border-radius:0;
+    border-color:transparent;
+    box-shadow:none;
+    filter:blur(.3px);
+    transition:width .22s ease, opacity .22s ease;
+  }
+  #win.docked .bar,
+  #win.docked .status,
+  #win.docked .edge{display:none}
+  #win.docked .page{padding:0;overflow:hidden}
+  /* 展开动画：宽度平滑长出来 */
+  #win{transition:width .22s ease, opacity .22s ease}
+
+  /* 贴边时露出的那一点点“钩子”，方便鼠标找到（收条贴在屏幕左侧） */
+  #dockHook{
+    position:fixed;z-index:999;
+    width:10px;top:0;bottom:0;left:0;
+    cursor:pointer;display:none;
+  }
+  #dockHook.show{display:block}
+
+  /* ---------- 顶栏 ---------- */
+  .bar{
+    height:32px;flex:none;
+    background:var(--bar);
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:4px;
+    padding:0 6px 0 10px;
+    cursor:grab;
+    font-size:12px;
+  }
+  .bar:active{cursor:grabbing}
+  .bar .title{
+    font-weight:700;color:var(--accent);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    flex:1;font-size:12.5px;
+  }
+  .bar .spacer{flex:1}
+  .tbtn{
+    border:0;background:transparent;color:var(--subtle);
+    font-size:13px;line-height:1;
+    width:26px;height:24px;border-radius:6px;
+    cursor:pointer;display:grid;place-items:center;
+    transition:background .13s,color .13s;
+    flex:none;
+  }
+  .tbtn:hover{background:#E0DFDB;color:var(--accent)}
+  .tbtn.on{background:#E0DFDB;color:var(--accent)}
+  .tbtn svg{width:15px;height:15px;display:block}
+
+  /* ---------- 正文 ---------- */
+  .page{
+    flex:1;overflow-y:auto;overflow-x:hidden;
+    padding:20px 22px 40px;
+    font-size:var(--fs);line-height:var(--lh);
+    scrollbar-width:thin;
+    scrollbar-color:#C4C3BF transparent;
+    cursor:default;
+  }
+  .page::-webkit-scrollbar{width:7px}
+  .page::-webkit-scrollbar-thumb{background:#C4C3BF;border-radius:4px}
+  .page::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+  .page::-webkit-scrollbar-track{background:transparent}
+
+  .page p{margin:0 0 .85em;text-indent:2em;text-align:justify}
+  .page h3{
+    color:var(--accent);font-size:1.06em;
+    margin:1.5em 0 .7em;text-indent:0;
+    font-weight:700;letter-spacing:.02em;
+  }
+  .page .tip{color:var(--subtle);text-indent:0;font-size:.9em;line-height:1.8}
+
+  /* ---------- 底栏 ---------- */
+  .status{
+    height:24px;flex:none;
+    background:var(--bar);border-top:1px solid var(--line);
+    display:flex;align-items:center;
+    padding:0 10px;gap:10px;
+    font-size:11px;color:var(--subtle);
+    cursor:grab;font-variant-numeric:tabular-nums;
+  }
+  .status b{color:var(--accent);font-weight:600}
+  .status .spacer{flex:1}
+
+  /* ---------- 缩放手柄 ---------- */
+  .edge{position:absolute;z-index:5}
+  .edge.r{right:0;top:14px;bottom:14px;width:9px;cursor:ew-resize}
+  .edge.l{left:0;top:14px;bottom:14px;width:9px;cursor:ew-resize}
+  .edge.b{bottom:0;left:14px;right:14px;height:9px;cursor:ns-resize}
+  .edge.t{top:0;left:14px;right:14px;height:9px;cursor:ns-resize}
+  .edge.br{right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize}
+  .edge.bl{left:0;bottom:0;width:20px;height:20px;cursor:nesw-resize}
+  .edge.tr{right:0;top:0;width:20px;height:20px;cursor:nesw-resize}
+  .edge.tl{left:0;top:0;width:20px;height:20px;cursor:nwse-resize}
+  /* 右下角缩放提示（三条斜纹） */
+  .edge.br::after{
+    content:"";position:absolute;right:3px;bottom:3px;
+    width:11px;height:11px;opacity:.5;
+    background:
+      linear-gradient(135deg,transparent 45%,var(--subtle) 45%,var(--subtle) 55%,transparent 55%),
+      linear-gradient(135deg,transparent 70%,var(--subtle) 70%,var(--subtle) 80%,transparent 80%);
+  }
+  .edge.br:hover::after{opacity:1}
+
+  /* ---------- 设置面板 ---------- */
+  #panel{
+    position:fixed;top:70px;left:60px;
+    width:290px;
+    background:rgba(251,248,241,.985);
+    border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 18px 46px rgba(0,0,0,.4);
+    padding:14px 16px 18px;
+    display:none;z-index:99;
+    font-size:12.5px;color:var(--ink);
+  }
+  #panel.show{display:block}
+  #panel h4{
+    font-size:13px;color:var(--accent);margin-bottom:12px;
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  #panel h4 span{cursor:pointer;color:var(--subtle);font-size:15px;line-height:1}
+  #panel h4 span:hover{color:var(--accent)}
+  .row{margin-bottom:13px}
+  .row label{display:flex;justify-content:space-between;margin-bottom:5px;color:#5A5A5E}
+  .row label b{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums}
+  input[type=range]{
+    width:100%;height:4px;border-radius:2px;appearance:none;
+    background:#D8D7D3;outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    appearance:none;width:14px;height:14px;border-radius:50%;
+    background:var(--accent);cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.28);
+  }
+  .books{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .book{
+    padding:4px 10px;border-radius:20px;
+    background:#E6E5E1;color:#5A5A5E;font-size:11.5px;
+    cursor:pointer;border:1px solid transparent;
+    transition:.13s;
+  }
+  .book:hover{background:#E0DFDB;color:var(--accent)}
+  .book.cur{background:var(--accent);color:#fff}
+  .hint{
+    margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);
+    color:var(--subtle);font-size:11px;line-height:1.85;
+  }
+  .hint kbd{
+    background:#E6E5E1;border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;font-family:inherit;font-size:10.5px;color:#6B6B70;
+  }
+
+  /* 隐藏时的“召回”小圆点 */
+  #recall{
+    position:fixed;width:38px;height:38px;border-radius:50%;
+    background:rgba(181,101,29,.92);color:#fff;
+    display:none;place-items:center;cursor:pointer;
+    box-shadow:0 6px 20px rgba(0,0,0,.4);
+    z-index:999;font-size:17px;
+    border:0;
+  }
+  #recall.show{display:grid}
+  #recall:hover{transform:scale(1.08)}
+</style>
+</head>
+<body>
+
+<div id="win">
+  <div class="bar" id="bar">
+    <span class="title" id="title">📖 摸鱼阅读器</span>
+    <span class="spacer"></span>
+    <button class="tbtn" id="bAuto"  title="自动滚动 (空格)"></button>
+    <button class="tbtn" id="bDisp"  title="伪装模式 (D)"></button>
+    <button class="tbtn" id="bDock"  title="侧边收条：鼠标移入展开 / 移出收起 (E)"></button>
+    <button class="tbtn" id="bSet"   title="设置 (S)"></button>
+    <button class="tbtn" id="bHide"  title="隐藏 (H)"></button>
+  </div>
+
+  <div class="page" id="page"></div>
+
+  <div class="status" id="status">
+    <span>进度 <b id="sPct">0%</b></span>
+    <span class="spacer"></span>
+    <span id="sInfo">字号 16 · 速度 0.6</span>
+  </div>
+
+  <div class="edge t"  data-dir="t"></div>
+  <div class="edge l"  data-dir="l"></div>
+  <div class="edge r"  data-dir="r"></div>
+  <div class="edge b"  data-dir="b"></div>
+  <div class="edge tl" data-dir="tl"></div>
+  <div class="edge tr" data-dir="tr"></div>
+  <div class="edge bl" data-dir="bl"></div>
+  <div class="edge br" data-dir="br"></div>
+</div>
+
+<!-- 收条状态下的贴边热区：鼠标碰到这里就展开 -->
+<div id="dockHook" title="鼠标移入展开"></div>
+
+<!-- 设置面板 -->
+<div id="panel">
+  <h4>阅读设置 <span id="pClose">✕</span></h4>
+
+  <div class="row">
+    <label>字号 <b id="vFs">16</b></label>
+    <input type="range" id="rFs" min="12" max="30" step="1" value="16">
+  </div>
+  <div class="row">
+    <label>行距 <b id="vLh">1.9</b></label>
+    <input type="range" id="rLh" min="14" max="30" step="1" value="19">
+  </div>
+  <div class="row">
+    <label>背景不透明度 <b id="vAl">94%</b></label>
+    <input type="range" id="rAl" min="30" max="100" step="1" value="94">
+  </div>
+  <div class="row">
+    <label>滚动速度 <b id="vSp">0.6</b></label>
+    <input type="range" id="rSp" min="2" max="60" step="1" value="6">
+  </div>
+  <div class="row">
+    <label>宽度 <b id="vWd">430</b></label>
+    <input type="range" id="rWd" min="260" max="900" step="10" value="430">
+  </div>
+
+  <div class="row">
+    <label>书库</label>
+    <div class="books" id="bookList"></div>
+  </div>
+
+  <div class="row">
+    <label>侧边收条（鼠标移入才展开）</label>
+    <div class="books">
+      <div class="book" id="dockSw">开启</div>
+    </div>
+  </div>
+
+  <div class="hint">
+    <kbd>空格</kbd> 自动滚动　<kbd>D</kbd> 伪装　<kbd>H</kbd> 隐藏<br>
+    <kbd>E</kbd> 侧边收条开关　<kbd>Ctrl</kbd>+<kbd>滚轮</kbd> 调透明度<br>
+    拖标题栏移动，拖右下角缩放<br>
+    <b>拖入 txt 文件</b>即可导入你自己的小说
+  </div>
+</div>
+
+<button id="recall" title="召回浮窗">📖</button>
+
+<script src="books.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------------------------------------------- 状态 */
+  var S = {
+    alpha: 0.93,
+    fs: 16,
+    lh: 1.9,
+    speed: 0.6,
+    width: 430,
+    height: 600,
+    auto: false,
+    disguised: false,
+    docked: false,      // 是否处于「侧边收条」自动收起状态
+    dockOn: true,       // 是否开启「鼠标移入才展开」
+    cur: 0,
+    ratio: 0,
+    progress: {}     // 书名 -> 阅读进度
+  };
+  var KEY = "moyu-reader-state-v1";
+
+  var $ = function(id){ return document.getElementById(id); };
+  var win = $("win"), page = $("page"), bar = $("bar"), status = $("status");
+  var hook = $("dockHook");
+
+  /* ---------------------------------------------------- 图标 */
+  var ICON = {
+    play : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+    disp : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h6M7 13h4"/></svg>',
+    gear : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>',
+    hide : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6z"/><path d="M3 3l18 18"/></svg>',
+    dock : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><path d="M19 9l2 3-2 3"/></svg>'
+  };
+  $("bAuto").innerHTML = ICON.play;
+  $("bDisp").innerHTML = ICON.disp;
+  $("bDock").innerHTML = ICON.dock;
+  $("bSet").innerHTML  = ICON.gear;
+  $("bHide").innerHTML = ICON.hide;
+
+  /* ---------------------------------------------------- 存档 */
+  function save(){
+    try{
+      localStorage.setItem(KEY, JSON.stringify({
+        alpha:S.alpha, fs:S.fs, lh:S.lh, speed:S.speed, width:S.width,
+        cur:S.cur, progress:S.progress, dockOn:S.dockOn,
+        pos:{left:win.style.left, top:win.style.top, h:win.style.height}
+      }));
+    }catch(e){}
+  }
+  function load(){
+    var raw;
+    try{ raw = localStorage.getItem(KEY); }catch(e){ return; }
+    if(!raw) return;
+    try{
+      var d = JSON.parse(raw);
+      ["alpha","fs","lh","speed","width","cur"].forEach(function(k){
+        if(typeof d[k] === "number") S[k] = d[k];
+      });
+      if(typeof d.dockOn === "boolean") S.dockOn = d.dockOn;
+      if(d.progress) S.progress = d.progress;
+      if(d.pos){
+        if(d.pos.left) win.style.left = d.pos.left;
+        if(d.pos.top)  win.style.top  = d.pos.top;
+        if(d.pos.h)    win.style.height = d.pos.h;
+      }
+    }catch(e){}
+  }
+
+  /* ---------------------------------------------------- 渲染 */
+  function renderBook(idx, keepRatio){
+    var b = window.BOOKS && window.BOOKS[idx];
+    if(!b) return;
+    S.cur = idx;
+    var html = [];
+    for(var i=0;i<b.paras.length;i++){
+      var t = b.paras[i];
+      if(t.length <= 20 && !/[。！？…；，]/.test(t)){
+        html.push("<h3>"+esc(t)+"</h3>");
+      }else{
+        html.push("<p>"+esc(t)+"</p>");
+      }
+    }
+    page.innerHTML = html.join("");
+    $("title").textContent = "📖 " + b.title;
+    page.scrollTop = 0;
+    if(keepRatio){
+      restoreAnchor(normAnchor(S.progress[b.title]));
+    }
+    renderBooks();
+    updateStatus();
+  }
+  function esc(s){
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function renderBooks(){
+    var box = $("bookList");
+    box.innerHTML = "";
+    (window.BOOKS||[]).forEach(function(b,i){
+      var d = document.createElement("div");
+      d.className = "book" + (i===S.cur ? " cur" : "");
+      d.textContent = b.title;
+      d.onclick = function(){ switchBook(i); };
+      box.appendChild(d);
+    });
+  }
+
+  /* ---------------------------------------------------- 进度 */
+  /* 进度存「绝对像素位置」而不是比例：
+     比例会随窗口高度变化而漂移，绝对位置不会。 */
+  function maxScroll(){ return Math.max(0, page.scrollHeight - page.clientHeight); }
+  function anchor(){ return page.scrollTop; }
+  function normAnchor(v){
+    if(typeof v !== "number" || !isFinite(v) || v <= 0) return 0;
+    if(v <= 1) return v * maxScroll();      // 旧存档是比例，换算成像素
+    return v;
+  }
+  function restoreAnchor(v, tries){
+    tries = tries || 0;
+    page.scrollTop = v;
+    // 刚渲染完时布局可能还没稳定，没落到位就再试几次
+    if(Math.abs(page.scrollTop - v) > 24 && tries < 12){
+      setTimeout(function(){ restoreAnchor(v, tries + 1); }, 50);
+    }
+    updateStatus();
+  }
+  function ratio(){
+    var m = maxScroll();
+    return m > 0 ? page.scrollTop / m : 0;
+  }
+  function setRatio(r){
+    page.scrollTop = Math.max(0, Math.min(1, r)) * maxScroll();
+    updateStatus();
+  }
+  function updateStatus(){
+    var pct = Math.round(ratio()*100);
+    $("sPct").textContent = pct + "%";
+    $("sInfo").textContent = "字号 " + S.fs + " · 速度 " + S.speed.toFixed(1);
+  }
+
+  /* ---------------------------------------------------- 应用样式 */
+  function applyStyle(){
+    document.documentElement.style.setProperty("--alpha", S.alpha);
+    document.documentElement.style.setProperty("--fs", S.fs + "px");
+    document.documentElement.style.setProperty("--lh", S.lh);
+    win.style.width = S.width + "px";
+    if(S.height) win.style.height = S.height + "px";
+    // 同步面板
+    $("rFs").value = S.fs;   $("vFs").textContent = S.fs;
+    $("rLh").value = Math.round(S.lh*10); $("vLh").textContent = S.lh.toFixed(1);
+    $("rAl").value = Math.round(S.alpha*100); $("vAl").textContent = Math.round(S.alpha*100)+"%";
+    $("rSp").value = Math.round(S.speed*10); $("vSp").textContent = S.speed.toFixed(1);
+    $("rWd").value = S.width; $("vWd").textContent = S.width;
+    updateStatus();
+  }
+
+  /* ---------------------------------------------------- 自动滚动 */
+  var rafId = null, acc = 0;
+  function tick(){
+    if(!S.auto) return;
+    acc += S.speed;
+    if(acc >= 1){
+      var step = Math.floor(acc);
+      acc -= step;
+      page.scrollTop += step;
+      var max = page.scrollHeight - page.clientHeight;
+      if(page.scrollTop >= max - 1){ setAuto(false); return; }
+      updateStatus();
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+  function setAuto(on){
+    S.auto = on;
+    $("bAuto").innerHTML = on ? ICON.pause : ICON.play;
+    $("bAuto").classList.toggle("on", on);
+    if(on){ cancelAnimationFrame(rafId); acc = 0; rafId = requestAnimationFrame(tick); }
+    else { cancelAnimationFrame(rafId); }
+    updateStatus();
+  }
+
+  /* ---------------------------------------------------- 伪装 / 隐藏 */
+  function setDisguise(on){
+    S.disguised = on;
+    win.classList.toggle("disguised", on);
+    $("bDisp").classList.toggle("on", on);
+    if(on) cancelDock();
+    else scheduleDock();
+  }
+  function setHidden(on){
+    if(on){
+      cancelDock();
+      win.classList.add("hidden");
+      var rec = $("recall");
+      rec.classList.add("show");
+      rec.style.left = (window.innerWidth - 66) + "px";
+      rec.style.top  = (window.innerHeight - 66) + "px";
+    }else{
+      win.classList.remove("hidden");
+      $("recall").classList.remove("show");
+      scheduleDock();
+    }
+  }
+
+  /* ---------------------------------------------------- 侧边收条 */
+  /* 鼠标不在窗口里 -> 缩成贴边一条细缝；鼠标碰到 -> 展开。
+     用 mousemove 监听整页，比 mouseenter 稳，也不会和拖拽打架。
+     规则与桌面版一致：
+       · 收条贴屏幕【左】边
+       · 刚打开时保持展开，鼠标真正进过窗口一次之后才启用「离开就收起」 */
+  var dockTimer = null;
+  var armed = false;              // 是否已被鼠标碰过（碰过才自动收起）
+
+  function setDocked(on){
+    if(S.disguised) on = false;         // 伪装模式下不收起，免得找不回来
+    if(win.classList.contains("hidden")) on = false;
+    S.docked = on;
+    win.classList.toggle("docked", on);
+    hook.classList.toggle("show", on);
+    if(on){
+      // 收起来时贴到屏幕左侧
+      var y = win.offsetTop;
+      win.style.left = "0px";
+      win.style.top  = Math.max(0, Math.min(y, window.innerHeight - 60)) + "px";
+      $("bDock").classList.add("on");
+    }else{
+      // 展开：从左侧长出来
+      var w = S.width || 430;
+      var x = win.offsetLeft;
+      if(x + w > window.innerWidth) x = Math.max(8, window.innerWidth - w - 4);
+      win.style.left = x + "px";
+      $("bDock").classList.remove("on");
+    }
+  }
+
+  function scheduleDock(){
+    if(!S.dockOn || S.disguised || win.classList.contains("hidden")) return;
+    if(!armed) return;              // 还没被碰过：保持展开，不自动收
+    clearTimeout(dockTimer);
+    dockTimer = setTimeout(function(){ setDocked(true); }, 700);
+  }
+
+  function cancelDock(){
+    clearTimeout(dockTimer);
+    dockTimer = null;
+    if(S.docked) setDocked(false);
+  }
+
+  function toggleDockMode(){
+    S.dockOn = !S.dockOn;
+    save();
+    if(S.dockOn){
+      hook.classList.add("show");
+      scheduleDock();
+    }else{
+      hook.classList.remove("show");
+      cancelDock();
+    }
+    var el = $("dockSw");
+    if(el){
+      el.textContent = S.dockOn ? "已开启" : "已关闭";
+      el.classList.toggle("cur", S.dockOn);
+    }
+  }
+
+  // 鼠标位置监听：进入窗口就展开；离开后由倒计时收起
+  // （不用 mouseleave，避免划过子元素时反复触发）
+  document.addEventListener("mousemove", function(e){
+    if(win.classList.contains("hidden")) return;
+    var r = win.getBoundingClientRect();
+    var inside = e.clientX >= r.left - 6 && e.clientX <= r.right + 6 &&
+                 e.clientY >= r.top - 6 && e.clientY <= r.bottom + 6;
+    if(inside){
+      armed = true;          // 鼠标真正进过一次，才启用自动收起
+      cancelDock();
+    }
+    scheduleDock();          // 无论内外都重新计时：在窗口内也不该收起
+  });
+
+  // 鼠标停在贴边热区上 -> 展开（等同于点过窗口，直接激活）
+  hook.addEventListener("mouseenter", function(){ armed = true; cancelDock(); });
+  hook.addEventListener("click", function(){ armed = true; cancelDock(); });
+
+  /* ---------------------------------------------------- 拖动 */
+  (function(){
+    var dragging = false, sx=0, sy=0, ox=0, oy=0, target=null;
+    function down(e, el){
+      if(e.target.closest(".tbtn")) return;
+      dragging = true;
+      cancelDock();               // 拖动时不要收起
+      var p = e.touches ? e.touches[0] : e;
+      sx = p.clientX; sy = p.clientY;
+      ox = win.offsetLeft; oy = win.offsetTop;
+      e.preventDefault();
+    }
+    function move(e){
+      if(!dragging) return;
+      var p = e.touches ? e.touches[0] : e;
+      var nx = Math.max(0, Math.min(window.innerWidth-60, ox + p.clientX - sx));
+      var ny = Math.max(0, Math.min(window.innerHeight-40, oy + p.clientY - sy));
+      win.style.left = nx + "px";
+      win.style.top  = ny + "px";
+    }
+    function up(){ if(dragging){ dragging=false; save(); scheduleDock(); } }
+    [bar, status].forEach(function(el){
+      el.addEventListener("mousedown", function(e){ down(e); });
+      el.addEventListener("touchstart", function(e){ down(e); }, {passive:false});
+    });
+    window.addEventListener("mousemove", move);
+    window.addEventListener("touchmove", move, {passive:false});
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchend", up);
+  })();
+
+  /* ---------------------------------------------------- 缩放 */
+  (function(){
+    var on=false, dir="", sx=0, sy=0, ow=0, oh=0, ox=0, oy=0;
+    var MINW=260, MINH=220;
+
+    document.querySelectorAll(".edge").forEach(function(h){
+      h.addEventListener("mousedown", function(e){
+        cancelDock();
+        on=true; dir=h.dataset.dir; sx=e.clientX; sy=e.clientY;
+        ow=win.offsetWidth; oh=win.offsetHeight;
+        ox=win.offsetLeft; oy=win.offsetTop;
+        e.preventDefault(); e.stopPropagation();
+      });
+    });
+
+    window.addEventListener("mousemove", function(e){
+      if(!on) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+
+      // 右侧 / 左侧
+      if(dir.indexOf("r") >= 0 && dir !== "tr") win.style.width  = Math.max(MINW, ow + dx) + "px";
+      if(dir.indexOf("l") >= 0){
+        var nw = Math.max(MINW, ow - dx);
+        win.style.width = nw + "px";
+        win.style.left  = (ox + ow - nw) + "px";
+      }
+      // 上边 / 下边
+      if(dir.indexOf("b") >= 0 && dir !== "bl" && dir !== "br") win.style.height = Math.max(MINH, oh + dy) + "px";
+      if(dir.indexOf("t") >= 0){
+        var nh = Math.max(MINH, oh - dy);
+        win.style.height = nh + "px";
+        win.style.top    = (oy + oh - nh) + "px";
+      }
+      // 角：tr / tl 同时改宽高
+      if(dir === "tr"){ win.style.width = Math.max(MINW, ow + dx) + "px"; }
+      if(dir === "tl"){ var w2 = Math.max(MINW, ow - dx); win.style.width = w2+"px"; win.style.left = (ox+ow-w2)+"px"; }
+      if(dir === "bl"){ win.style.height = Math.max(MINH, oh + dy) + "px"; }
+      if(dir === "br"){ win.style.height = Math.max(MINH, oh + dy) + "px"; }
+      if(dir === "tr" || dir === "tl"){
+        var nh2 = Math.max(MINH, oh - dy);
+        win.style.height = nh2 + "px";
+        win.style.top = (oy + oh - nh2) + "px";
+      }
+      if(dir === "bl"){
+        var w3 = Math.max(MINW, ow - dx);
+        win.style.width = w3 + "px"; win.style.left = (ox+ow-w3) + "px";
+      }
+      if(dir === "br"){ win.style.width = Math.max(MINW, ow + dx) + "px"; }
+
+      S.width = win.offsetWidth;
+      S.height = win.offsetHeight;
+      $("rWd").value = S.width; $("vWd").textContent = S.width;
+    });
+
+    window.addEventListener("mouseup", function(){ if(on){ on=false; save(); scheduleDock(); } });
+  })();
+
+  /* ---------------------------------------------------- 滚动条 & 滚轮 */
+  page.addEventListener("scroll", function(){
+    var b = window.BOOKS && window.BOOKS[S.cur];
+    if(b) S.progress[b.title] = anchor();
+    updateStatus();
+  });
+
+  document.addEventListener("wheel", function(e){
+    if(e.ctrlKey){
+      e.preventDefault();
+      var d = e.deltaY > 0 ? -0.03 : 0.03;
+      S.alpha = Math.max(0.30, Math.min(1, +(S.alpha + d).toFixed(2)));
+      applyStyle(); save();
+    }
+  }, {passive:false});
+
+  /* ---------------------------------------------------- 快捷键 */
+  document.addEventListener("keydown", function(e){
+    var tag = (e.target.tagName || "").toLowerCase();
+    if(tag === "input" && e.key !== "Escape") return;
+
+    if(e.code === "Space"){ e.preventDefault(); setAuto(!S.auto); return; }
+    if(e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")){
+      e.preventDefault();
+      S.fs = Math.max(12, Math.min(30, S.fs + (e.key === "ArrowUp" ? 1 : -1)));
+      applyStyle(); save(); return;
+    }
+    if(e.ctrlKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")){
+      e.preventDefault();
+      S.speed = Math.max(0.2, Math.min(6, +(S.speed + (e.key === "ArrowRight" ? 0.2 : -0.2)).toFixed(1)));
+      applyStyle(); save(); return;
+    }
+    if(e.ctrlKey) return;
+    var k = e.key.toLowerCase();
+    if(k === "h"){ e.preventDefault(); setHidden(!win.classList.contains("hidden")); return; }
+    if(k === "d"){ e.preventDefault(); setDisguise(!S.disguised); return; }
+    if(k === "e"){ e.preventDefault(); toggleDockMode(); return; }
+    if(k === "s"){ e.preventDefault(); togglePanel(); return; }
+  });
+
+  /* ---------------------------------------------------- 拖入 txt 导入 */
+  document.addEventListener("dragover", function(e){ e.preventDefault(); });
+  document.addEventListener("drop", function(e){
+    e.preventDefault();
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(!f) return;
+    readFile(f);
+  });
+  function readFile(f){
+    var fr = new FileReader();
+    fr.onload = function(){
+      var text = String(fr.result || "");
+      var paras = text.replace(/\r\n?/g,"\n").split("\n")
+                       .map(function(s){ return s.trim(); })
+                       .filter(function(s){ return s; });
+      if(!paras.length){ alert("这个文件没有可读内容"); return; }
+      var title = f.name.replace(/\.txt$/i, "");
+      var idx = (window.BOOKS||[]).findIndex(function(b){ return b.title === title; });
+      if(idx >= 0) window.BOOKS[idx].paras = paras;
+      else{ window.BOOKS.push({title:title, paras:paras}); idx = window.BOOKS.length-1; }
+      renderBook(idx, false);
+    };
+    fr.readAsText(f, "UTF-8");
+  }
+
+  /* ---------------------------------------------------- 设置面板 */
+  function togglePanel(){
+    var p = $("panel");
+    p.classList.toggle("show");
+    if(p.classList.contains("show")){
+      // 面板贴着浮窗放，避免遮挡
+      var r = win.getBoundingClientRect();
+      var left = r.right + 12;
+      if(left + 290 > window.innerWidth) left = Math.max(8, r.left - 302);
+      p.style.left = left + "px";
+      p.style.top  = Math.min(r.top, window.innerHeight - 560) + "px";
+      $("bSet").classList.add("on");
+    }else{
+      $("bSet").classList.remove("on");
+    }
+  }
+  $("pClose").onclick = togglePanel;
+  $("bSet").onclick = togglePanel;
+
+  function syncDockSw(){
+    var el = $("dockSw");
+    el.textContent = S.dockOn ? "已开启" : "已关闭";
+    el.classList.toggle("cur", S.dockOn);
+  }
+  $("dockSw").onclick = function(){ toggleDockMode(); syncDockSw(); };
+
+  function bindRange(id, fn){
+    $(id).addEventListener("input", function(){ fn(+this.value); applyStyle(); save(); });
+  }
+  bindRange("rFs", function(v){ S.fs = v; });
+  bindRange("rLh", function(v){ S.lh = v/10; });
+  bindRange("rAl", function(v){ S.alpha = v/100; });
+  bindRange("rSp", function(v){ S.speed = v/10; });
+  bindRange("rWd", function(v){ S.width = v; });
+
+  /* ---------------------------------------------------- 按钮 */
+  $("bAuto").onclick = function(){ setAuto(!S.auto); };
+  $("bDisp").onclick = function(){ setDisguise(!S.disguised); };
+  $("bDock").onclick = toggleDockMode;
+  $("bHide").onclick = function(){ setHidden(true); };
+  $("recall").onclick = function(){ setHidden(false); };
+  $("recall").oncontextmenu = function(e){ e.preventDefault(); setHidden(false); };
+
+  function switchBook(i){
+    var cur = window.BOOKS[S.cur];
+    if(cur) S.progress[cur.title] = anchor();
+    renderBook(i, true);
+    save();
+  }
+
+  /* ---------------------------------------------------- 启动 */
+  load();
+  if(!window.BOOKS || !window.BOOKS.length){
+    page.innerHTML = '<p class="tip">还没有书。把一本 txt 小说直接拖进这个窗口，就能开始读了。<br><br>也可以点击底部的「设置」查看快捷键。</p>';
+  }else{
+    renderBook(Math.min(S.cur, window.BOOKS.length-1), true);
+  }
+  applyStyle();
+
+  // 侧边收条：按上次的选择决定是否开启。
+  // 注意：刚打开时【不】自动收起——保持展开，等鼠标真正进过窗口一次
+  // （armed = true）之后，才由 mousemove -> scheduleDock 接管收展。
+  if(S.dockOn){
+    $("bDock").classList.add("on");
+  }else{
+    $("bDock").classList.remove("on");
+  }
+  syncDockSw();
+
+  window.addEventListener("beforeunload", save);
+  setInterval(save, 15000);
+
+  // 调试探针：把状态挂到 window 上，方便自动化验证（不影响功能）
+  window.__moyu = { S:S, win:win, docked:function(){return S.docked;},
+                    armed:function(){return armed;},
+                    w:function(){return win.offsetWidth;} };
+
+  // 窗口尺寸变化时校正位置
+  window.addEventListener("resize", function(){
+    var r = win.getBoundingClientRect();
+    if(r.left > window.innerWidth - 80) win.style.left = Math.max(0, window.innerWidth - 200) + "px";
+    if(r.top  > window.innerHeight - 60) win.style.top = Math.max(0, window.innerHeight - 200) + "px";
+  });
+})();
+</script>
+</body>
+</html>

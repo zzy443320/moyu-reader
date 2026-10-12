@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------
+# 版权书籍（不上传！）
+# books/ 下的 txt 小说是受版权保护的读物，仅供本地阅读。
+# 想阅读请自备 txt，或在程序里用「打开本地 txt」导入。
+# ---------------------------------------------------------------
+books/*.txt
+web/books.js
+
+# 个人阅读配置（记录了你读到哪本书、哪个位置）
+config.json
+
+# 打包出来的书籍数据（体积大且含版权内容）
+books/books.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 测试与临时产物
+tools/_test_config.json
+tools/_probe_cfg.json
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
